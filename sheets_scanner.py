@@ -1,5 +1,6 @@
 import gspread
 import json
+import os
 from google.oauth2.service_account import Credentials
 import traceback
 from fastapi import FastAPI, HTTPException
@@ -9,10 +10,31 @@ import uvicorn
 
 def scan_google_sheets():
     try:
-        # Load credentials
-        print("Loading credentials...")
-        with open('credentials.json', 'r') as f:
-            creds_info = json.load(f)
+        # Load credentials from environment variables
+        print("Loading credentials from environment variables...")
+        
+        # Check if running on Render (environment variables) or locally (JSON file)
+        if os.getenv('GOOGLE_PROJECT_ID'):
+            # Use environment variables (for Render deployment)
+            creds_info = {
+                "type": os.getenv('GOOGLE_CREDENTIALS_TYPE'),
+                "project_id": os.getenv('GOOGLE_PROJECT_ID'),
+                "private_key_id": os.getenv('GOOGLE_PRIVATE_KEY_ID'),
+                "private_key": os.getenv('GOOGLE_PRIVATE_KEY').replace('\\n', '\n'),
+                "client_email": os.getenv('GOOGLE_CLIENT_EMAIL'),
+                "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+                "auth_uri": os.getenv('GOOGLE_AUTH_URI'),
+                "token_uri": os.getenv('GOOGLE_TOKEN_URI'),
+                "auth_provider_x509_cert_url": os.getenv('GOOGLE_AUTH_PROVIDER_X509_CERT_URL'),
+                "client_x509_cert_url": os.getenv('GOOGLE_CLIENT_X509_CERT_URL'),
+                "universe_domain": os.getenv('GOOGLE_UNIVERSE_DOMAIN')
+            }
+            print("✓ Using environment variables for credentials")
+        else:
+            # Use local JSON file (for local development)
+            with open('credentials.json', 'r') as f:
+                creds_info = json.load(f)
+            print("✓ Using local credentials.json file")
         
         # Set up the credentials and authorize
         print("Setting up credentials...")
@@ -136,7 +158,7 @@ def scan_google_sheets():
         print("\nTroubleshooting steps:")
         print("1. Make sure the service account email has been shared with the Google Sheet")
         print("2. Check if the spreadsheet ID is correct")
-        print("3. Verify the credentials.json file is valid")
+        print("3. Verify the credentials are valid")
         return None
 
 # Create FastAPI app
@@ -149,15 +171,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",    # React default
-        "http://localhost:5173",    # Vite default
-        "http://localhost:8080",    # Vue default
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:8080",
-        "*"  # Allow all origins (use with caution in production)
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -203,28 +217,13 @@ async def home():
             "/": "GET - API information",
             "/docs": "GET - Interactive API documentation",
             "/redoc": "GET - Alternative API documentation"
-        },
-        "example_response": {
-            "success": True,
-            "count": 2,
-            "teams": [
-                {
-                    "team_name": "Example Team",
-                    "domains": "example.com"
-                }
-            ]
         }
     }
 
 if __name__ == "__main__":
-    # Run the FastAPI app
+    port = int(os.environ.get("PORT", 8000))
     print("Starting Team Domains API with FastAPI...")
     print("CORS enabled for frontend development")
-    print("API Endpoints:")
-    print("  GET /teams - Fetch all team names and domains")
-    print("  GET /      - API information")
-    print("  GET /docs  - Interactive API documentation (Swagger UI)")
-    print("  GET /redoc - Alternative API documentation")
-    print("\nStarting server on http://localhost:8000")
+    print(f"Starting server on port {port}")
     
-    uvicorn.run("sheets_scanner:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("sheets_scanner:app", host="0.0.0.0", port=port, reload=False)
