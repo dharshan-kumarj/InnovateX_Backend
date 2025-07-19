@@ -87,12 +87,13 @@ def scan_google_sheets():
         print(f"Found {len(all_values)} rows of data")
         print("Headers:", all_values[0])
         
-        # Find columns for team name and domains
+        # Find columns for team name, domains, and team leader
         header_row = all_values[0]
         team_name_col = None
         domains_col = None
+        team_leader_col = None
         
-        # Look for team name column (case insensitive)
+        # Look for team name, domains, and team leader columns (case insensitive)
         for i, header in enumerate(header_row):
             header_lower = header.lower()
             print(f"Column {i}: '{header}' -> '{header_lower}'")
@@ -103,6 +104,11 @@ def scan_google_sheets():
             elif 'domain' in header_lower:
                 domains_col = i
                 print(f"Found domains column at index {i}")
+            elif ('team' in header_lower and 'leader' in header_lower and 'name' in header_lower and 'reg' in header_lower) or \
+                 ('leader' in header_lower and 'name' in header_lower and 'reg' in header_lower) or \
+                 ('leader' in header_lower and ('name' in header_lower or 'reg' in header_lower) and 'number' not in header_lower and 'whatsapp' not in header_lower):
+                team_leader_col = i
+                print(f"Found team leader (name & reg) column at index {i}")
         
         # If exact matches not found, try broader search
         if team_name_col is None:
@@ -119,25 +125,45 @@ def scan_google_sheets():
                     print(f"Using broader match for domains column at index {i}: '{header}'")
                     break
         
+        if team_leader_col is None:
+            for i, header in enumerate(header_row):
+                header_lower = header.lower()
+                # Look for team leader with name/reg but exclude number/whatsapp columns
+                if ('leader' in header_lower and 
+                    ('name' in header_lower or 'reg' in header_lower) and 
+                    'number' not in header_lower and 
+                    'whatsapp' not in header_lower and
+                    'phone' not in header_lower):
+                    team_leader_col = i
+                    print(f"Using broader match for team leader (name & reg) column at index {i}: '{header}'")
+                    break
+        
         if team_name_col is None or domains_col is None:
             print("Could not find team name or domains columns.")
             print("Available headers:", header_row)
             print("Please check the column names in your spreadsheet.")
             return
         
-        # Extract team names and domains
+        # Extract team names, domains, and team leaders
         team_data = []
         for row_idx, row in enumerate(all_values[1:], 1):  # Skip header row
-            if len(row) > max(team_name_col, domains_col):
+            if len(row) > max(team_name_col, domains_col, team_leader_col or 0):
                 team_name = row[team_name_col].strip() if team_name_col < len(row) else ""
                 domains = row[domains_col].strip() if domains_col < len(row) else ""
+                team_leader = row[team_leader_col].strip() if team_leader_col is not None and team_leader_col < len(row) else ""
                 
                 if team_name and domains:  # Only include rows with both values
-                    team_data.append({
+                    team_entry = {
                         'team_name': team_name,
                         'domains': domains
-                    })
-                    print(f"Row {row_idx}: {team_name} -> {domains}")
+                    }
+                    
+                    # Add team leader if available
+                    if team_leader:
+                        team_entry['team_leader'] = team_leader
+                    
+                    team_data.append(team_entry)
+                    print(f"Row {row_idx}: {team_name} -> {domains}" + (f" (Leader: {team_leader})" if team_leader else ""))
         
         # Output the results
         print("\n" + "=" * 50)
@@ -147,6 +173,8 @@ def scan_google_sheets():
         for i, team in enumerate(team_data, 1):
             print(f"{i}. Team Name: {team['team_name']}")
             print(f"   Domains: {team['domains']}")
+            if 'team_leader' in team:
+                print(f"   Team Leader: {team['team_leader']}")
             print("-" * 30)
         
         return team_data
