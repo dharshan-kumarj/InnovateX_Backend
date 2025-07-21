@@ -447,23 +447,59 @@ def get_teams_by_category(category: str):
         if not all_values:
             return {"error": "No data found in the sheet"}
         
-        # Find columns for team name and team leader
+        # Find columns for all required fields
         header_row = all_values[0]
         team_name_col = None
         team_leader_col = None
+        team_member1_col = None
+        team_member2_col = None
+        reg_leader_col = None
+        reg_member1_col = None
+        reg_member2_col = None
         
         print(f"Headers: {header_row}")
         
-        # Look for team name and team leader columns
+        # Look for all columns with detailed matching
         for i, header in enumerate(header_row):
             header_lower = header.lower().strip()
+            print(f"Column {i}: '{header}' -> '{header_lower}'")
             
+            # Team Name
             if ('team' in header_lower and 'name' in header_lower) or header_lower == 'team name':
                 team_name_col = i
                 print(f"Found team name column at index {i}: '{header}'")
+            
+            # Team Leader
             elif ('team' in header_lower and 'leader' in header_lower) or 'leader' in header_lower:
-                team_leader_col = i
-                print(f"Found team leader column at index {i}: '{header}'")
+                if 'reg' not in header_lower and 'number' not in header_lower:
+                    team_leader_col = i
+                    print(f"Found team leader column at index {i}: '{header}'")
+            
+            # Team Member 1
+            elif ('team' in header_lower and 'member' in header_lower and '1' in header_lower) or \
+                 ('member' in header_lower and '1' in header_lower):
+                if 'reg' not in header_lower and 'number' not in header_lower:
+                    team_member1_col = i
+                    print(f"Found team member 1 column at index {i}: '{header}'")
+            
+            # Team Member 2
+            elif ('team' in header_lower and 'member' in header_lower and '2' in header_lower) or \
+                 ('member' in header_lower and '2' in header_lower):
+                if 'reg' not in header_lower and 'number' not in header_lower:
+                    team_member2_col = i
+                    print(f"Found team member 2 column at index {i}: '{header}'")
+            
+            # Registration Numbers - Updated mapping
+            elif 'reg' in header_lower and ('number' in header_lower or 'no' in header_lower):
+                if 'leader' in header_lower or ('1' in header_lower and 'member' not in header_lower):
+                    reg_leader_col = i
+                    print(f"Found registration number for leader (Reg Number1) column at index {i}: '{header}'")
+                elif '2' in header_lower:
+                    reg_member1_col = i  # Reg Number2 goes to reg_member1
+                    print(f"Found registration number for member 1 (Reg Number2) column at index {i}: '{header}'")
+                elif '3' in header_lower:
+                    reg_member2_col = i  # Reg Number3 goes to reg_member2
+                    print(f"Found registration number for member 2 (Reg Number3) column at index {i}: '{header}'")
         
         # Broader search if exact matches not found
         if team_name_col is None:
@@ -475,31 +511,78 @@ def get_teams_by_category(category: str):
         
         if team_leader_col is None:
             for i, header in enumerate(header_row):
-                if 'leader' in header.lower():
+                if 'leader' in header.lower() and 'reg' not in header.lower():
                     team_leader_col = i
                     print(f"Using broader match for team leader column at index {i}: '{header}'")
+                    break
+        
+        # Look for member columns if not found
+        if team_member1_col is None:
+            for i, header in enumerate(header_row):
+                header_lower = header.lower()
+                if 'member' in header_lower and ('1' in header_lower or 'one' in header_lower) and 'reg' not in header_lower:
+                    team_member1_col = i
+                    print(f"Using broader match for team member 1 column at index {i}: '{header}'")
+                    break
+        
+        if team_member2_col is None:
+            for i, header in enumerate(header_row):
+                header_lower = header.lower()
+                if 'member' in header_lower and ('2' in header_lower or 'two' in header_lower) and 'reg' not in header_lower:
+                    team_member2_col = i
+                    print(f"Using broader match for team member 2 column at index {i}: '{header}'")
+                    break
+        
+        # Look for registration number columns if not found - Updated logic
+        if reg_leader_col is None:
+            for i, header in enumerate(header_row):
+                header_lower = header.lower()
+                if ('reg' in header_lower or 'registration' in header_lower) and \
+                   (('1' in header_lower and 'member' not in header_lower) or 'leader' in header_lower):
+                    reg_leader_col = i
+                    print(f"Using broader match for reg leader (Reg Number1) column at index {i}: '{header}'")
+                    break
+        
+        if reg_member1_col is None:
+            for i, header in enumerate(header_row):
+                header_lower = header.lower()
+                if ('reg' in header_lower or 'registration' in header_lower) and '2' in header_lower:
+                    reg_member1_col = i
+                    print(f"Using broader match for reg member 1 (Reg Number2) column at index {i}: '{header}'")
+                    break
+        
+        if reg_member2_col is None:
+            for i, header in enumerate(header_row):
+                header_lower = header.lower()
+                if ('reg' in header_lower or 'registration' in header_lower) and '3' in header_lower:
+                    reg_member2_col = i
+                    print(f"Using broader match for reg member 2 (Reg Number3) column at index {i}: '{header}'")
                     break
         
         if team_name_col is None:
             return {"error": "Could not find team name column"}
         
-        if team_leader_col is None:
-            return {"error": "Could not find team leader column"}
-        
-        # Extract team data
+        # Extract team data with all available information
         teams_data = []
+        max_col = max(filter(None, [team_name_col, team_leader_col, team_member1_col, team_member2_col, 
+                                   reg_leader_col, reg_member1_col, reg_member2_col]))
+        
         for row_idx, row in enumerate(all_values[1:], 1):  # Skip header row
-            if len(row) > max(team_name_col, team_leader_col):
+            if len(row) > max_col:
                 team_name = row[team_name_col].strip() if team_name_col < len(row) else ""
-                team_leader = row[team_leader_col].strip() if team_leader_col < len(row) else ""
                 
                 if team_name:  # Only include rows with team name
                     team_entry = {
                         'team_name': team_name,
-                        'team_leader': team_leader if team_leader else "Not specified"
+                        'team_leader': row[team_leader_col].strip() if team_leader_col is not None and team_leader_col < len(row) else "Not specified",
+                        'team_member1': row[team_member1_col].strip() if team_member1_col is not None and team_member1_col < len(row) else "Not specified",
+                        'team_member2': row[team_member2_col].strip() if team_member2_col is not None and team_member2_col < len(row) else "Not specified",
+                        'reg_leader': row[reg_leader_col].strip() if reg_leader_col is not None and reg_leader_col < len(row) else "Not specified",
+                        'reg_member1': row[reg_member1_col].strip() if reg_member1_col is not None and reg_member1_col < len(row) else "Not specified",
+                        'reg_member2': row[reg_member2_col].strip() if reg_member2_col is not None and reg_member2_col < len(row) else "Not specified"
                     }
                     teams_data.append(team_entry)
-                    print(f"Row {row_idx}: {team_name} -> Leader: {team_leader}")
+                    print(f"Row {row_idx}: {team_name} -> Leader: {team_entry['team_leader']} ({team_entry['reg_leader']}) | Member1: {team_entry['team_member1']} ({team_entry['reg_member1']}) | Member2: {team_entry['team_member2']} ({team_entry['reg_member2']})")
         
         return {
             "success": True,
