@@ -358,6 +358,161 @@ def save_attendance_to_sheets(regno: str, day: str, event_type: str, category: s
         print(f"Error saving attendance: {str(e)}")
         return {"error": f"Internal server error: {str(e)}"}
 
+def get_teams_by_category(category: str):
+    """
+    Retrieve team names and team leaders from specific Google Sheets based on category
+    """
+    try:
+        # Load credentials (same as other functions)
+        print(f"Loading credentials for category: {category}")
+        
+        if os.getenv('GOOGLE_PROJECT_ID'):
+            creds_info = {
+                "type": os.getenv('GOOGLE_CREDENTIALS_TYPE'),
+                "project_id": os.getenv('GOOGLE_PROJECT_ID'),
+                "private_key_id": os.getenv('GOOGLE_PRIVATE_KEY_ID'),
+                "private_key": os.getenv('GOOGLE_PRIVATE_KEY').replace('\\n', '\n'),
+                "client_email": os.getenv('GOOGLE_CLIENT_EMAIL'),
+                "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+                "auth_uri": os.getenv('GOOGLE_AUTH_URI'),
+                "token_uri": os.getenv('GOOGLE_TOKEN_URI'),
+                "auth_provider_x509_cert_url": os.getenv('GOOGLE_AUTH_PROVIDER_X509_CERT_URL'),
+                "client_x509_cert_url": os.getenv('GOOGLE_CLIENT_X509_CERT_URL'),
+                "universe_domain": os.getenv('GOOGLE_UNIVERSE_DOMAIN')
+            }
+        else:
+            with open('credentials.json', 'r') as f:
+                creds_info = json.load(f)
+        
+        # Set up credentials
+        scope = [
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/drive'
+        ]
+        
+        creds = Credentials.from_service_account_info(creds_info, scopes=scope)
+        client = gspread.authorize(creds)
+        
+        # Same spreadsheet ID as the original function
+        sheet_id = "1I7ddC_ij6L0fnkowLMBjxiZzKF7eICEktYobUXpPCVI"
+        spreadsheet = client.open_by_key(sheet_id)
+        
+        # Determine which worksheet to use based on category
+        target_gid = None
+        category_lower = category.lower()
+        
+        if category_lower in ["ai/ml", "ai", "ml", "aiml"]:
+            target_gid = "1880278751"  # AI/ML batch sheet
+            print("Using AI/ML batch sheet")
+        elif category_lower in ["cyber", "cybersecurity", "security"]:
+            target_gid = "1671574899"  # Cyber batch sheet
+            print("Using Cyber batch sheet")
+        elif category_lower in ["full stack", "fullstack", "full-stack"]:
+            # For full stack, we'll return data from both AI/ML and Cyber sheets
+            print("Full stack requested - will fetch from both AI/ML and Cyber sheets")
+            aiml_data = get_teams_by_category("ai/ml")
+            cyber_data = get_teams_by_category("cyber")
+            
+            if aiml_data and cyber_data and "teams" in aiml_data and "teams" in cyber_data:
+                combined_teams = aiml_data["teams"] + cyber_data["teams"]
+                return {
+                    "success": True,
+                    "category": "Full Stack",
+                    "count": len(combined_teams),
+                    "teams": combined_teams,
+                    "sources": ["AI/ML", "Cyber"]
+                }
+            else:
+                return {"error": "Failed to fetch data from AI/ML or Cyber sheets"}
+        else:
+            return {"error": f"Invalid category: {category}. Use 'AI/ML', 'Cyber', or 'Full Stack'"}
+        
+        # Get worksheets and find the target one
+        worksheets = spreadsheet.worksheets()
+        target_worksheet = None
+        
+        for worksheet in worksheets:
+            if str(worksheet.id) == target_gid:
+                target_worksheet = worksheet
+                break
+        
+        if not target_worksheet:
+            return {"error": f"Worksheet with gid {target_gid} not found for category {category}"}
+        
+        print(f"Found target worksheet: {target_worksheet.title}")
+        
+        # Get all values from the sheet
+        all_values = target_worksheet.get_all_values()
+        
+        if not all_values:
+            return {"error": "No data found in the sheet"}
+        
+        # Find columns for team name and team leader
+        header_row = all_values[0]
+        team_name_col = None
+        team_leader_col = None
+        
+        print(f"Headers: {header_row}")
+        
+        # Look for team name and team leader columns
+        for i, header in enumerate(header_row):
+            header_lower = header.lower().strip()
+            
+            if ('team' in header_lower and 'name' in header_lower) or header_lower == 'team name':
+                team_name_col = i
+                print(f"Found team name column at index {i}: '{header}'")
+            elif ('team' in header_lower and 'leader' in header_lower) or 'leader' in header_lower:
+                team_leader_col = i
+                print(f"Found team leader column at index {i}: '{header}'")
+        
+        # Broader search if exact matches not found
+        if team_name_col is None:
+            for i, header in enumerate(header_row):
+                if 'team' in header.lower():
+                    team_name_col = i
+                    print(f"Using broader match for team column at index {i}: '{header}'")
+                    break
+        
+        if team_leader_col is None:
+            for i, header in enumerate(header_row):
+                if 'leader' in header.lower():
+                    team_leader_col = i
+                    print(f"Using broader match for team leader column at index {i}: '{header}'")
+                    break
+        
+        if team_name_col is None:
+            return {"error": "Could not find team name column"}
+        
+        if team_leader_col is None:
+            return {"error": "Could not find team leader column"}
+        
+        # Extract team data
+        teams_data = []
+        for row_idx, row in enumerate(all_values[1:], 1):  # Skip header row
+            if len(row) > max(team_name_col, team_leader_col):
+                team_name = row[team_name_col].strip() if team_name_col < len(row) else ""
+                team_leader = row[team_leader_col].strip() if team_leader_col < len(row) else ""
+                
+                if team_name:  # Only include rows with team name
+                    team_entry = {
+                        'team_name': team_name,
+                        'team_leader': team_leader if team_leader else "Not specified"
+                    }
+                    teams_data.append(team_entry)
+                    print(f"Row {row_idx}: {team_name} -> Leader: {team_leader}")
+        
+        return {
+            "success": True,
+            "category": category,
+            "count": len(teams_data),
+            "teams": teams_data
+        }
+        
+    except Exception as e:
+        print(f"Error fetching teams by category: {str(e)}")
+        traceback.print_exc()
+        return {"error": f"Internal server error: {str(e)}"}
+
 # Create FastAPI app
 app = FastAPI(
     title="Team Domains API",
@@ -424,6 +579,25 @@ async def save_attendance(request: AttendanceRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error": "Internal server error", "message": str(e)})
 
+@app.get("/teams-by-category/{category}")
+async def get_teams_by_category_endpoint(category: str):
+    """
+    API endpoint to fetch team names and team leaders by category
+    Categories: AI/ML, Cyber, Full Stack
+    """
+    try:
+        result = get_teams_by_category(category)
+        
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result)
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": "Internal server error", "message": str(e)})
+
 @app.get("/")
 async def home():
     """Home endpoint with API information"""
@@ -431,10 +605,16 @@ async def home():
         "message": "Team Domains API",
         "endpoints": {
             "/teams": "GET - Fetch all team names and domains",
+            "/teams-by-category/{category}": "GET - Fetch team names and team leaders by category (AI/ML, Cyber, Full Stack)",
             "/attendance": "POST - Save attendance data to Google Sheets",
             "/": "GET - API information",
             "/docs": "GET - Interactive API documentation",
             "/redoc": "GET - Alternative API documentation"
+        },
+        "category_examples": {
+            "AI/ML": "/teams-by-category/AI/ML or /teams-by-category/AIML",
+            "Cyber": "/teams-by-category/Cyber or /teams-by-category/cybersecurity", 
+            "Full Stack": "/teams-by-category/Full Stack or /teams-by-category/fullstack"
         },
         "attendance_usage": {
             "method": "POST",
