@@ -203,6 +203,80 @@ class AttendanceRecord(BaseModel):
 class MassAttendanceRequest(BaseModel):
     attendance_records: list[AttendanceRecord]
 
+# Pydantic model for login request
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+# Hardcoded user credentials (in production, this should be in a secure database)
+USERS = {
+    "dharshankumarjeyakumar@karunya.edu.in": {
+        "password": "Dharshan18@Innovate-x",
+        "name": "Admin User",
+        "role": "administrator"
+    },
+    "ronniea@karunya.edu.in": {
+        "password": "Innovate-x@Ronnie34", 
+        "name": "Admin User",
+        "role": "administrator"
+    },
+    "danishprabhu@karunya.edu.in": {
+        "password": "Danis22h@Innovate-x",
+        "name": "Admin User",
+        "role": "administrator"
+    },
+    "deepakumar23@karunya.edu.in": {
+        "password": "Innovate-x@Deepa23", 
+        "name": "Admin User",
+        "role": "administrator"
+    },
+    "kevinj@karunya.edu.in": {
+        "password": "Kevin15@Innovate-x",
+        "name": "Admin User", 
+        "role": "administrator"
+    }
+}
+
+def authenticate_user(email: str, password: str):
+    """
+    Simple authentication function to verify user credentials
+    """
+    try:
+        # Check if email exists in our users database
+        if email not in USERS:
+            return {
+                "success": False,
+                "error": "Invalid email address",
+                "message": "User not found"
+            }
+        
+        # Check if password matches
+        user_data = USERS[email]
+        if user_data["password"] != password:
+            return {
+                "success": False,
+                "error": "Invalid password",
+                "message": "Incorrect password"
+            }
+        
+        # Successful authentication
+        return {
+            "success": True,
+            "message": "Login successful",
+            "user": {
+                "email": email,
+                "name": user_data["name"],
+                "role": user_data["role"]
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": "Authentication error",
+            "message": f"Internal server error: {str(e)}"
+        }
+
 def save_attendance_to_sheets(regno: str, name: str, day: str, event_type: str, category: str = None):
     try:
         # Validation
@@ -890,6 +964,42 @@ async def get_teams_by_category_endpoint(category: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error": "Internal server error", "message": str(e)})
 
+@app.post("/login")
+async def login_user(request: LoginRequest):
+    """
+    API endpoint for user authentication
+    Accepts email and password for login
+    """
+    try:
+        if not request.email or not request.password:
+            raise HTTPException(
+                status_code=400, 
+                detail={
+                    "success": False,
+                    "error": "Missing credentials",
+                    "message": "Email and password are required"
+                }
+            )
+        
+        result = authenticate_user(request.email, request.password)
+        
+        if not result["success"]:
+            raise HTTPException(status_code=401, detail=result)
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail={
+                "success": False,
+                "error": "Internal server error", 
+                "message": str(e)
+            }
+        )
+
 @app.get("/")
 async def home():
     """Home endpoint with API information"""
@@ -899,6 +1009,7 @@ async def home():
             "/teams": "GET - Fetch all team names and domains",
             "/teams-by-category/{category}": "GET - Fetch team names and team leaders by category (AI/ML, Cyber, Full Stack)",
             "/attendance": "POST - Save attendance data to Google Sheets",
+            "/login": "POST - User authentication with email and password",
             "/": "GET - API information",
             "/docs": "GET - Interactive API documentation",
             "/redoc": "GET - Alternative API documentation"
@@ -907,6 +1018,35 @@ async def home():
             "AI/ML": "/teams-by-category/AI/ML or /teams-by-category/AIML",
             "Cyber": "/teams-by-category/Cyber or /teams-by-category/cybersecurity", 
             "Full Stack": "/teams-by-category/Full Stack or /teams-by-category/fullstack"
+        },
+        "login_usage": {
+            "method": "POST",
+            "endpoint": "/login",
+            "body": {
+                "email": "User email address (string)",
+                "password": "User password (string)"
+            },
+            "available_users": {
+                "admin": {
+                    "email": "admin@innovatex.com",
+                    "password": "admin123",
+                    "role": "administrator"
+                },
+                "organizer": {
+                    "email": "organizer@innovatex.com", 
+                    "password": "organizer123",
+                    "role": "organizer"
+                },
+                "volunteer": {
+                    "email": "volunteer@innovatex.com",
+                    "password": "volunteer123", 
+                    "role": "volunteer"
+                }
+            },
+            "example": {
+                "email": "admin@innovatex.com",
+                "password": "admin123"
+            }
         },
         "attendance_usage": {
             "method": "POST",
