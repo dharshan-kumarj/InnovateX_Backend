@@ -163,6 +163,7 @@ def scan_google_sheets():
                     # Add team leader if available
                     if team_leader:
                         team_entry['team_leader'] = team_leader
+                        team_entry['team_leader'] = team_leader
                     
                     team_data.append(team_entry)
                     print(f"Row {row_idx}: {team_name} -> {domains}" + (f" (Leader: {team_leader})" if team_leader else ""))
@@ -639,6 +640,228 @@ def save_mass_attendance_to_sheets(attendance_records: list):
         print(f"Error saving attendance: {str(e)}")
         return {"error": f"Internal server error: {str(e)}"}
 
+def get_attendance_dashboard(category: str):
+    """
+    Retrieve attendance data from attendance sheets and combine with team names
+    """
+    try:
+        # Load credentials
+        print(f"Loading credentials for attendance dashboard: {category}")
+        
+        if os.getenv('GOOGLE_PROJECT_ID'):
+            creds_info = {
+                "type": os.getenv('GOOGLE_CREDENTIALS_TYPE'),
+                "project_id": os.getenv('GOOGLE_PROJECT_ID'),
+                "private_key_id": os.getenv('GOOGLE_PRIVATE_KEY_ID'),
+                "private_key": os.getenv('GOOGLE_PRIVATE_KEY').replace('\\n', '\n'),
+                "client_email": os.getenv('GOOGLE_CLIENT_EMAIL'),
+                "client_id": os.getenv('GOOGLE_CLIENT_ID'),
+                "auth_uri": os.getenv('GOOGLE_AUTH_URI'),
+                "token_uri": os.getenv('GOOGLE_TOKEN_URI'),
+                "auth_provider_x509_cert_url": os.getenv('GOOGLE_AUTH_PROVIDER_X509_CERT_URL'),
+                "client_x509_cert_url": os.getenv('GOOGLE_CLIENT_X509_CERT_URL'),
+                "universe_domain": os.getenv('GOOGLE_UNIVERSE_DOMAIN')
+            }
+        else:
+            with open('credentials.json', 'r') as f:
+                creds_info = json.load(f)
+        
+        # Set up credentials
+        scope = [
+            'https://www.googleapis.com/auth/spreadsheets',
+            'https://www.googleapis.com/auth/drive'
+        ]
+        
+        creds = Credentials.from_service_account_info(creds_info, scopes=scope)
+        client = gspread.authorize(creds)
+        
+        # Determine which attendance sheet to use based on category
+        attendance_gid = None
+        team_gid = None
+        category_lower = category.lower()
+        
+        if category_lower in ["ai/ml", "ai", "ml", "aiml"]:
+            attendance_gid = "1402668955"  # AI/ML Bootcamp attendance sheet
+            team_gid = "1880278751"  # AI/ML team sheet
+            worksheet_name = "AI/ML Bootcamp"
+            print("Using AI/ML attendance and team sheets")
+        elif category_lower in ["cyber", "cybersecurity", "security"]:
+            attendance_gid = "892979352"  # Cyber Bootcamp attendance sheet
+            team_gid = "1671574899"  # Cyber team sheet
+            worksheet_name = "Cyber Bootcamp"
+            print("Using Cyber attendance and team sheets")
+        elif category_lower in ["full stack", "fullstack", "full-stack"]:
+            attendance_gid = "2034220711"  # Full Stack attendance sheet
+            # For full stack, we'll get team data from both AI/ML and Cyber
+            worksheet_name = "Full Stack Development"
+            print("Using Full Stack attendance sheet")
+        else:
+            return {"error": f"Invalid category: {category}. Use 'AI/ML', 'Cyber', or 'Full Stack'"}
+        
+        # Get attendance data
+        attendance_sheet_id = "1Nw0GzQuxKZYefPGPRvcQZk4RlkRnZLsIwPc6RD7SPBI"
+        attendance_spreadsheet = client.open_by_key(attendance_sheet_id)
+        
+        # Find attendance worksheet by gid
+        attendance_worksheet = None
+        for worksheet in attendance_spreadsheet.worksheets():
+            if str(worksheet.id) == attendance_gid:
+                attendance_worksheet = worksheet
+                break
+        
+        if not attendance_worksheet:
+            return {"error": f"Attendance worksheet with gid {attendance_gid} not found for category {category}"}
+        
+        print(f"Found attendance worksheet: {attendance_worksheet.title}")
+        
+        # Get attendance data
+        attendance_values = attendance_worksheet.get_all_values()
+        if not attendance_values:
+            return {"error": "No attendance data found"}
+        
+        attendance_headers = attendance_values[0]
+        attendance_data = []
+        
+        # Extract attendance records (Registration Number, Day, Timestamp)
+        for row_idx, row in enumerate(attendance_values[1:], 1):
+            if len(row) >= 3:  # Ensure we have at least 3 columns
+                attendance_record = {
+                    'registration_number': row[0].strip() if len(row) > 0 else "",
+                    'name': row[1].strip() if len(row) > 1 else "",
+                    'day': row[2].strip() if len(row) > 2 else "",
+                    'timestamp': row[3].strip() if len(row) > 3 else "",
+                    'event_type': row[4].strip() if len(row) > 4 else "",
+                    'category': row[5].strip() if len(row) > 5 else ""
+                }
+                
+                if attendance_record['registration_number']:  # Only include non-empty records
+                    attendance_data.append(attendance_record)
+        
+        # Get team data
+        team_sheet_id = "1I7ddC_ij6L0fnkowLMBjxiZzKF7eICEktYobUXpPCVI"
+        team_spreadsheet = client.open_by_key(team_sheet_id)
+        
+        teams_data = {}  # Dictionary to map registration numbers to team names
+        
+        if category_lower in ["full stack", "fullstack", "full-stack"]:
+            # For full stack, get team data from both AI/ML and Cyber sheets
+            for gid, sheet_name in [("1880278751", "AI/ML"), ("1671574899", "Cyber")]:
+                team_worksheet = None
+                for worksheet in team_spreadsheet.worksheets():
+                    if str(worksheet.id) == gid:
+                        team_worksheet = worksheet
+                        break
+                
+                if team_worksheet:
+                    print(f"Found {sheet_name} team worksheet: {team_worksheet.title}")
+                    team_values = team_worksheet.get_all_values()
+                    if team_values:
+                        # Extract team data and map registration numbers to team names
+                        team_headers = team_values[0]
+                        
+                        # Find the Team Name column
+                        team_name_col = None
+                        for i, header in enumerate(team_headers):
+                            header_lower = header.lower().strip()
+                            if ('team' in header_lower and 'name' in header_lower) or header_lower == 'team name':
+                                team_name_col = i
+                                print(f"Found team name column at index {i}: '{header}'")
+                                break
+                        
+                        # If not found, use broader search
+                        if team_name_col is None:
+                            for i, header in enumerate(team_headers):
+                                if 'team' in header.lower() and 'name' in header.lower():
+                                    team_name_col = i
+                                    print(f"Using broader match for team name column at index {i}: '{header}'")
+                                    break
+                        
+                        # If still not found, default to first column but log warning
+                        if team_name_col is None:
+                            team_name_col = 0
+                            print(f"Warning: Could not find Team Name column, using first column")
+                        
+                        for row in team_values[1:]:
+                            if len(row) >= 4:  # Ensure we have team name and registration numbers
+                                team_name = row[team_name_col].strip() if team_name_col < len(row) else ""
+                                # Map multiple registration numbers to team name
+                                for i in range(1, min(len(row), 7)):  # Check columns 1-6 for registration numbers
+                                    reg_number = row[i].strip() if i < len(row) else ""
+                                    if reg_number and reg_number != "Not specified":
+                                        teams_data[reg_number] = team_name
+        else:
+            # For AI/ML or Cyber, get team data from specific sheet
+            team_worksheet = None
+            for worksheet in team_spreadsheet.worksheets():
+                if str(worksheet.id) == team_gid:
+                    team_worksheet = worksheet
+                    break
+            
+            if team_worksheet:
+                print(f"Found team worksheet: {team_worksheet.title}")
+                team_values = team_worksheet.get_all_values()
+                if team_values:
+                    # Extract team data and map registration numbers to team names
+                    team_headers = team_values[0]
+                    
+                    # Find the Team Name column
+                    team_name_col = None
+                    for i, header in enumerate(team_headers):
+                        header_lower = header.lower().strip()
+                        if ('team' in header_lower and 'name' in header_lower) or header_lower == 'team name':
+                            team_name_col = i
+                            print(f"Found team name column at index {i}: '{header}'")
+                            break
+                    
+                    # If not found, use broader search
+                    if team_name_col is None:
+                        for i, header in enumerate(team_headers):
+                            if 'team' in header.lower() and 'name' in header.lower():
+                                team_name_col = i
+                                print(f"Using broader match for team name column at index {i}: '{header}'")
+                                break
+                    
+                    # If still not found, default to first column but log warning
+                    if team_name_col is None:
+                        team_name_col = 0
+                        print(f"Warning: Could not find Team Name column, using first column")
+                    
+                    for row in team_values[1:]:
+                        if len(row) >= 4:  # Ensure we have team name and registration numbers
+                            team_name = row[team_name_col].strip() if team_name_col < len(row) else ""
+                            # Map multiple registration numbers to team name
+                            for i in range(1, min(len(row), 7)):  # Check columns 1-6 for registration numbers
+                                reg_number = row[i].strip() if i < len(row) else ""
+                                if reg_number and reg_number != "Not specified":
+                                    teams_data[reg_number] = team_name
+        
+        # Combine attendance data with team names
+        dashboard_data = []
+        for attendance_record in attendance_data:
+            reg_number = attendance_record['registration_number']
+            team_name = teams_data.get(reg_number, "Team not found")
+            
+            dashboard_record = {
+                'registration_number': reg_number,
+                'name': attendance_record['name'],
+                'day': attendance_record['day'],
+                'timestamp': attendance_record['timestamp'],
+                'team_name': team_name
+            }
+            dashboard_data.append(dashboard_record)
+        
+        return {
+            "success": True,
+            "category": category,
+            "total_attendance": len(dashboard_data),
+            "attendance_data": dashboard_data
+        }
+        
+    except Exception as e:
+        print(f"Error fetching attendance dashboard: {str(e)}")
+        traceback.print_exc()
+        return {"error": f"Internal server error: {str(e)}"}
+
 def get_teams_by_category(category: str):
     """
     Retrieve team names and team leaders from specific Google Sheets based on category
@@ -864,6 +1087,8 @@ def get_teams_by_category(category: str):
                     }
                     teams_data.append(team_entry)
                     print(f"Row {row_idx}: {team_name} -> Leader: {team_entry['team_leader']} ({team_entry['reg_leader']}) | Member1: {team_entry['team_member1']} ({team_entry['reg_member1']}) | Member2: {team_entry['team_member2']} ({team_entry['reg_member2']})")
+                    teams_data.append(team_entry)
+                    print(f"Row {row_idx}: {team_name} -> Leader: {team_entry['team_leader']} ({team_entry['reg_leader']}) | Member1: {team_entry['team_member1']} ({team_entry['reg_member1']}) | Member2: {team_entry['team_member2']} ({team_entry['reg_member2']})")
         
         return {
             "success": True,
@@ -907,6 +1132,13 @@ async def get_teams():
                     "message": "Check server logs for details"
                 }
             )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "error": "Failed to fetch data from Google Sheets",
+                    "message": "Check server logs for details"
+                }
+            )
         
         return {
             "success": True,
@@ -932,6 +1164,7 @@ async def save_attendance(request: MassAttendanceRequest):
     try:
         if not request.attendance_records:
             raise HTTPException(status_code=400, detail={"error": "No attendance records provided"})
+            raise HTTPException(status_code=400, detail={"error": "No attendance records provided"})
         
         result = save_mass_attendance_to_sheets(request.attendance_records)
         
@@ -953,6 +1186,27 @@ async def get_teams_by_category_endpoint(category: str):
     """
     try:
         result = get_teams_by_category(category)
+        
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result)
+            raise HTTPException(status_code=400, detail=result)
+        
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": "Internal server error", "message": str(e)})
+
+@app.get("/dashboard/attendance/{category}")
+async def get_attendance_dashboard_endpoint(category: str):
+    """
+    API endpoint to fetch attendance dashboard data by category
+    Categories: AI/ML, Cyber, Full Stack
+    Returns attendance data (Registration Number, Name, Day, Timestamp) combined with team names
+    """
+    try:
+        result = get_attendance_dashboard(category)
         
         if "error" in result:
             raise HTTPException(status_code=400, detail=result)
@@ -1008,6 +1262,7 @@ async def home():
         "endpoints": {
             "/teams": "GET - Fetch all team names and domains",
             "/teams-by-category/{category}": "GET - Fetch team names and team leaders by category (AI/ML, Cyber, Full Stack)",
+            "/dashboard/attendance/{category}": "GET - Fetch attendance dashboard data by category (AI/ML, Cyber, Full Stack)",
             "/attendance": "POST - Save attendance data to Google Sheets",
             "/login": "POST - User authentication with email and password",
             "/": "GET - API information",
@@ -1018,6 +1273,31 @@ async def home():
             "AI/ML": "/teams-by-category/AI/ML or /teams-by-category/AIML",
             "Cyber": "/teams-by-category/Cyber or /teams-by-category/cybersecurity", 
             "Full Stack": "/teams-by-category/Full Stack or /teams-by-category/fullstack"
+        },
+        "dashboard_usage": {
+            "method": "GET",
+            "endpoint": "/dashboard/attendance/{category}",
+            "description": "Get attendance data combined with team names for dashboard",
+            "categories": ["AI/ML", "Cyber", "Full Stack"],
+            "examples": {
+                "AI/ML": "/dashboard/attendance/AI/ML",
+                "Cyber": "/dashboard/attendance/Cyber",
+                "Full Stack": "/dashboard/attendance/Full Stack"
+            },
+            "response_format": {
+                "success": True,
+                "category": "Category name",
+                "total_attendance": "Number of attendance records",
+                "attendance_data": [
+                    {
+                        "registration_number": "Student registration number",
+                        "name": "Student name",
+                        "day": "Day of attendance", 
+                        "timestamp": "When attendance was recorded",
+                        "team_name": "Team name from team sheets"
+                    }
+                ]
+            }
         },
         "login_usage": {
             "method": "POST",
