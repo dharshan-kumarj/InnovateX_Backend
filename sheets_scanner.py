@@ -212,27 +212,27 @@ class LoginRequest(BaseModel):
 # Hardcoded user credentials (in production, this should be in a secure database)
 USERS = {
     "dharshankumarjeyakumar@karunya.edu.in": {
-        "password": "Dharshan18@Innovate-x",
+        "password": "Dharshan18",
         "name": "Admin User",
         "role": "administrator"
     },
     "ronniea@karunya.edu.in": {
-        "password": "Innovate-x@Ronnie34", 
+        "password": "Ronnie34", 
         "name": "Admin User",
         "role": "administrator"
     },
     "danishprabhu@karunya.edu.in": {
-        "password": "Danis22h@Innovate-x",
+        "password": "Danis22",
         "name": "Admin User",
         "role": "administrator"
     },
     "deepakumar23@karunya.edu.in": {
-        "password": "Innovate-x@Deepa23", 
+        "password": "Deepa23", 
         "name": "Admin User",
         "role": "administrator"
     },
     "kevinj@karunya.edu.in": {
-        "password": "Kevin15@Innovate-x",
+        "password": "Kevin15",
         "name": "Admin User", 
         "role": "administrator"
     }
